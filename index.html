@@ -6,53 +6,54 @@
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: 'Helvetica', sans-serif; }
         canvas { display: block; }
+
+        /* 極限までシンプルにしたホーム画面 */
         .overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.9); display: flex; flex-direction: column;
-            justify-content: center; align-items: center; z-index: 100; color: #00ff88;
+            background: #000; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 100;
         }
-        h1 { font-size: 48px; letter-spacing: 12px; margin-bottom: 30px; font-weight: 200; }
-        input { 
-            padding: 10px; background: transparent; border: none; border-bottom: 1px solid #00ff88; 
-            color: #fff; width: 200px; text-align: center; font-size: 18px; outline: none; margin-bottom: 30px;
+        #nickname { 
+            background: transparent; border: none; border-bottom: 1px solid #333; 
+            color: #00ff88; width: 240px; text-align: center; font-size: 20px; 
+            outline: none; padding: 10px; margin-bottom: 40px; letter-spacing: 2px;
         }
+        #nickname:focus { border-bottom: 1px solid #00ff88; }
         button { 
-            padding: 10px 40px; background: transparent; color: #00ff88; border: 1px solid #00ff88;
-            cursor: pointer; font-size: 16px; letter-spacing: 2px; transition: 0.2s;
+            background: transparent; color: #00ff88; border: 1px solid #333;
+            padding: 10px 60px; cursor: pointer; font-size: 14px; letter-spacing: 4px; transition: 0.3s;
         }
-        button:hover { background: #00ff88; color: #000; }
-        #ui { position: fixed; top: 20px; left: 20px; color: #00ff88; font-size: 24px; pointer-events: none; }
+        button:hover { border: 1px solid #00ff88; color: #fff; }
+
+        /* UI要素 */
+        #ui { position: fixed; top: 30px; left: 30px; color: #00ff88; font-size: 28px; pointer-events: none; font-weight: 100; }
         #leaderboard {
-            position: absolute; top: 20px; right: 20px;
-            background: rgba(0, 0, 0, 0.5); padding: 10px; min-width: 150px; color: #fff; font-size: 12px;
+            position: absolute; top: 30px; right: 30px;
+            background: rgba(0, 0, 0, 0.4); padding: 10px; min-width: 160px; color: #fff; font-size: 12px;
         }
-        .rank-row { display: flex; justify-content: space-between; margin: 2px 0; }
+        .rank-row { display: flex; justify-content: space-between; margin: 4px 0; opacity: 0.8; }
         #minimap-container {
-            position: absolute; top: 160px; right: 20px;
-            width: 150px; height: 150px;
-            background: rgba(0, 40, 20, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 50%;
-            overflow: hidden; pointer-events: none;
+            position: absolute; top: 180px; right: 30px;
+            width: 140px; height: 140px;
+            background: rgba(0, 20, 10, 0.2); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 50%;
         }
     </style>
 </head>
 <body>
 
 <div id="lobby" class="overlay">
-    <h1>SLITHERIN</h1>
-    <input type="text" id="nickname" placeholder="NICKNAME" maxlength="10">
+    <input type="text" id="nickname" placeholder="ENTER NAME" maxlength="10">
     <button id="start-btn">START</button>
 </div>
 
 <div id="death-screen" class="overlay" style="display: none;">
-    <h1 style="color: #ff3333;">WASTED</h1>
-    <p id="final-score" style="font-size: 24px; margin-bottom: 20px;">Score: 0</p>
+    <p id="final-score" style="color:#ff3333; font-size: 20px; letter-spacing: 4px; margin-bottom: 30px;"></p>
     <button id="retry-btn">RETRY</button>
 </div>
 
-<div id="ui">Score: <span id="score-val">0</span></div>
+<div id="ui">SCORE: <span id="score-val">0</span></div>
 <div id="leaderboard"><div id="rank-list"></div></div>
-<div id="minimap-container"><canvas id="minimap" width="150" height="150"></canvas></div>
+<div id="minimap-container"><canvas id="minimap" width="140" height="140"></canvas></div>
 
 <canvas id="gameCanvas"></canvas>
 
@@ -63,8 +64,7 @@ const ctx = canvas.getContext('2d');
 const socket = io();
 
 const WORLD_SIZE = 4000;
-const BOT_COUNT = 8; // ボットの数
-const BOT_NAMES = ["Darkness", "Phantom", "Sly", "Shadow", "Viper", "Cobra", "Basilisk", "Naga"];
+const BOT_COUNT = 10;
 let width, height, player;
 let otherSnakes = {};
 let bots = [];
@@ -82,7 +82,7 @@ class Snake {
         this.x = 500 + Math.random() * (WORLD_SIZE - 1000);
         this.y = 500 + Math.random() * (WORLD_SIZE - 1000);
         this.segments = []; this.length = 25; this.radius = 14;
-        this.angle = Math.random() * Math.PI * 2; this.speed = 3.5;
+        this.angle = Math.random() * Math.PI * 2; this.speed = 4;
         this.dead = false; this.score = 0;
         for (let i = 0; i < this.length; i++) this.segments.push({ x: this.x, y: this.y });
     }
@@ -94,38 +94,40 @@ class Snake {
             while (diff < -Math.PI) diff += Math.PI * 2;
             while (diff > Math.PI) diff -= Math.PI * 2;
             this.angle += diff * 0.15;
-        } else if (this.isBot) {
-            // ボットのAI
+        } else {
             if (Math.random() < 0.02) this.angle += (Math.random() - 0.5) * 2;
-            if (this.x < 200 || this.x > WORLD_SIZE - 200 || this.y < 200 || this.y > WORLD_SIZE - 200) this.angle += 0.15;
+            if (this.x < 150 || this.x > WORLD_SIZE - 150 || this.y < 150 || this.y > WORLD_SIZE - 150) this.angle += 0.2;
         }
 
         const boost = (this.isPlayer && mouse.pressed) && this.length > 20;
-        this.speed = boost ? 7 : 3.5;
+        this.speed = boost ? 8 : 4;
         if (boost) this.length -= 0.05;
 
-        const nx = this.segments[0].x + Math.cos(this.angle) * this.speed;
-        const ny = this.segments[0].y + Math.sin(this.angle) * this.speed;
+        this.x += Math.cos(this.angle) * this.speed;
+        this.y += Math.sin(this.angle) * this.speed;
 
-        if (nx < 0 || nx > WORLD_SIZE || ny < 0 || ny > WORLD_SIZE) { this.die(); return; }
+        if (this.x < 0 || this.x > WORLD_SIZE || this.y < 0 || this.y > WORLD_SIZE) { this.die(); return; }
 
-        // 当たり判定 (自分、他プレイヤー、ボットすべて)
-        const allEnemies = [...Object.values(otherSnakes), ...bots.filter(b => b !== this)];
-        if (this.isPlayer) allEnemies.push(...bots); // プレイヤー視点ではボットも敵
+        // 当たり判定
+        const enemies = [...Object.values(otherSnakes), ...bots.filter(b => b !== this)];
+        if (this.isPlayer) enemies.push(...bots);
         
-        for (let enemy of allEnemies) {
+        for (let enemy of enemies) {
             if (!enemy.segments || enemy.dead) continue;
             for (let i = 0; i < enemy.segments.length; i++) {
-                if (Math.hypot(nx - enemy.segments[i].x, ny - enemy.segments[i].y) < this.radius + 5) {
+                if (Math.hypot(this.x - enemy.segments[i].x, this.y - enemy.segments[i].y) < this.radius + 5) {
                     this.die(); return;
                 }
             }
         }
 
-        this.segments.unshift({ x: nx, y: ny });
+        this.segments.unshift({ x: this.x, y: this.y });
         if (this.segments.length > this.length) this.segments.pop();
-        this.x = nx; this.y = ny; this.score = Math.floor(this.length * 10);
+        this.score = Math.floor(this.length * 10);
         
+        // スコア表示のリアルタイム更新（自機のみ）
+        if(this.isPlayer) document.getElementById('score-val').innerText = this.score;
+
         foods = foods.filter(f => {
             if (Math.hypot(this.x - f.x, this.y - f.y) < this.radius + f.s) {
                 this.length += f.v; return false;
@@ -137,10 +139,9 @@ class Snake {
         this.dead = true;
         if (this.isPlayer) {
             socket.emit('died', { segments: this.segments });
-            document.getElementById('final-score').innerText = `Score: ${this.score}`;
+            document.getElementById('final-score').innerText = `SCORE: ${this.score}`;
             document.getElementById('death-screen').style.display = 'flex';
-        } else if (this.isBot) {
-            // ボットが死んだらエサを撒いてリスポーン
+        } else {
             this.segments.forEach((s, i) => { if(i%5===0) foods.push(new Food(s.x, s.y, true)); });
             setTimeout(() => this.init(), 3000);
         }
@@ -150,10 +151,10 @@ class Snake {
         ctx.save();
         for (let i = this.segments.length - 1; i >= 0; i--) {
             if (i % 2 !== 0 && i !== 0) continue;
-            ctx.fillStyle = isMe ? this.color : (this.isBot ? "#2a2a2a" : "#444");
+            ctx.fillStyle = isMe ? this.color : (this.isBot ? this.color : "#444");
             ctx.beginPath(); ctx.arc(this.segments[i].x - camera.x, this.segments[i].y - camera.y, this.radius, 0, Math.PI * 2); ctx.fill();
         }
-        ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.textAlign = "center";
+        ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.textAlign = "center";
         ctx.fillText(this.name, this.segments[0].x - camera.x, this.segments[0].y - camera.y - 20);
         ctx.restore();
     }
@@ -164,16 +165,15 @@ class Food {
         this.x = x || Math.random() * WORLD_SIZE; this.y = y || Math.random() * WORLD_SIZE;
         this.pulse = Math.random() * 10;
         const r = Math.random();
-        if (isSpecial) { this.s = 8; this.v = 4; this.c = "#ffffff"; this.glow = true; }
-        else if (r > 0.98) { this.s = 15; this.v = 15; this.c = "#00ff88"; this.glow = true; }
-        else if (r > 0.85) { this.s = 9; this.v = 5; this.c = "#bf00ff"; this.glow = true; }
-        else { this.s = 4; this.v = 1; this.c = `hsl(${Math.random()*360}, 80%, 60%)`; this.glow = false; }
+        if (isSpecial) { this.s = 8; this.v = 4; this.c = "#fff"; this.glow = true; }
+        else if (r > 0.98) { this.s = 14; this.v = 15; this.c = "#00ff88"; this.glow = true; }
+        else { this.s = 4; this.v = 1; this.c = `hsl(${Math.random()*360}, 70%, 60%)`; this.glow = false; }
     }
     draw() {
-        this.pulse += 0.1; let drawSize = this.s + (this.glow ? Math.sin(this.pulse) * 2 : 0);
+        this.pulse += 0.1; let ds = this.s + (this.glow ? Math.sin(this.pulse) * 2 : 0);
         ctx.save(); ctx.fillStyle = this.c;
-        if (this.glow) { ctx.shadowBlur = 15; ctx.shadowColor = this.c; }
-        ctx.beginPath(); ctx.arc(this.x - camera.x, this.y - camera.y, drawSize, 0, Math.PI * 2); ctx.fill();
+        if (this.glow) { ctx.shadowBlur = 10; ctx.shadowColor = this.c; }
+        ctx.beginPath(); ctx.arc(this.x - camera.x, this.y - camera.y, ds, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
     }
 }
@@ -182,14 +182,14 @@ function resize() { width = canvas.width = window.innerWidth; height = canvas.he
 window.onresize = resize; resize();
 
 function startGame() {
-    const n = document.getElementById('nickname').value || "Snake";
+    const n = document.getElementById('nickname').value || "Slytherin";
     localStorage.setItem('sl-nick', n);
     document.getElementById('lobby').style.display = 'none';
     document.getElementById('death-screen').style.display = 'none';
     if (!player) {
         player = new Snake(n, "#00ff88", true);
-        for(let i=0; i<BOT_COUNT; i++) bots.push(new Snake(BOT_NAMES[i], "#333", false, true));
-        for(let i=0; i<300; i++) foods.push(new Food());
+        for(let i=0; i<BOT_COUNT; i++) bots.push(new Snake(`BOT-${i}`, `hsl(${Math.random()*360}, 60%, 50%)`, false, true));
+        for(let i=0; i<400; i++) foods.push(new Food());
         loop();
     } else { player.init(); }
     socket.emit('join', { name: n });
@@ -201,35 +201,34 @@ socket.on('updatePlayers', d => { otherSnakes = d; });
 socket.on('spawnFoods', data => { data.forEach(f => foods.push(new Food(f.x, f.y, true))); });
 
 function loop() {
-    ctx.fillStyle = "#050505"; ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, width, height);
     if (!player.dead) {
         player.update();
         camera.x = player.x - width / 2; camera.y = player.y - height / 2;
     }
-    ctx.strokeStyle = "#ff0000"; ctx.lineWidth = 10;
-    ctx.strokeRect(-camera.x, -camera.y, WORLD_SIZE, WORLD_SIZE);
+    ctx.strokeStyle = "#222"; ctx.lineWidth = 1;
+    for (let x = -camera.x % 100; x < width; x += 100) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,height); ctx.stroke(); }
+    for (let y = -camera.y % 100; y < height; y += 100) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(width,y); ctx.stroke(); }
 
     foods.forEach(f => f.draw());
-    if (foods.length < 300) foods.push(new Food());
-
     bots.forEach(b => { b.update(); b.draw(false); });
     for (let id in otherSnakes) {
         if (id === socket.id) continue;
         const o = otherSnakes[id];
-        ctx.fillStyle = "#444";
+        ctx.fillStyle = "#333";
         o.segments?.forEach((s, i) => { if (i % 2 === 0) { ctx.beginPath(); ctx.arc(s.x - camera.x, s.y - camera.y, 14, 0, Math.PI*2); ctx.fill(); } });
     }
     player.draw(true);
 
     const all = [{name: player.name, score: player.score, me: true}, ...bots, ...Object.values(otherSnakes).filter(s=>s.id !== socket.id)];
-    const list = all.sort((a,b) => (b.score||0) - (a.score||0)).slice(0, 5);
-    document.getElementById('rank-list').innerHTML = list.map((s, i) => `<div class="rank-row" style="color: ${s.me ? '#00ff88' : '#888'}"><span>#${i + 1} ${s.name}</span><span>${s.score || 0}</span></div>`).join('');
+    const list = all.sort((a,b) => b.score - a.score).slice(0, 5);
+    document.getElementById('rank-list').innerHTML = list.map((s, i) => `<div class="rank-row" style="color: ${s.me ? '#00ff88' : '#888'}"><span>#${i+1} ${s.name}</span><span>${s.score||0}</span></div>`).join('');
     
-    // ミニマップ描画 (ボットは非表示)
+    // ミニマップ (自分=白, 敵=赤, ボット非表示)
     const mCtx = document.getElementById('minimap').getContext('2d');
-    const sc = 150 / WORLD_SIZE;
-    mCtx.clearRect(0, 0, 150, 150);
-    mCtx.strokeStyle = "rgba(255, 0, 0, 0.5)"; mCtx.strokeRect(0,0,150,150);
+    const sc = 140 / WORLD_SIZE;
+    mCtx.clearRect(0, 0, 140, 140);
+    mCtx.strokeStyle = "rgba(255,0,0,0.3)"; mCtx.strokeRect(0,0,140,140);
     for(let id in otherSnakes) {
         const o = otherSnakes[id];
         if(o.segments?.length > 0) { mCtx.fillStyle = "#ff3333"; mCtx.beginPath(); mCtx.arc(o.segments[0].x*sc, o.segments[0].y*sc, 2, 0, Math.PI*2); mCtx.fill(); }
