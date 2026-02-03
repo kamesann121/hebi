@@ -2,26 +2,29 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>新しいタブ</title></title>
+    <title>新しいタブ</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #0a0a0a; font-family: 'Arial', sans-serif; }
+        body { margin: 0; overflow: hidden; background: #050505; font-family: 'Georgia', serif; }
         canvas { display: block; }
         #ui { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; color: white; }
         #score-container { position: absolute; top: 20px; left: 20px; }
-        #score-val { font-size: 36px; font-weight: bold; color: #00ffcc; }
+        #score-val { font-size: 36px; font-weight: bold; color: #00ff88; text-shadow: 0 0 10px #00ff88; }
         #leaderboard {
             position: absolute; top: 20px; right: 20px;
-            background: rgba(0, 0, 0, 0.7); padding: 15px; border-radius: 10px;
-            border: 1px solid #444; min-width: 180px;
+            background: rgba(0, 20, 10, 0.8); padding: 15px; border-radius: 10px;
+            border: 1px solid #004d2c; min-width: 200px;
         }
-        .rank-row { display: flex; justify-content: space-between; font-size: 14px; margin: 4px 0; }
+        .rank-row { display: flex; justify-content: space-between; font-size: 14px; margin: 4px 0; border-bottom: 1px solid rgba(0,255,136,0.1); }
         #lobby {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 15, 10, 0.95); display: flex; justify-content: center; align-items: center; z-index: 100; pointer-events: auto;
+            background: radial-gradient(circle, #002211 0%, #000000 100%);
+            display: flex; justify-content: center; align-items: center; z-index: 100; pointer-events: auto;
         }
-        .lobby-content { text-align: center; color: #00ffcc; border: 2px solid #004d2c; padding: 50px; border-radius: 20px; background: #000; }
-        input { padding: 12px; background: #111; border: 1px solid #00ffcc; color: #fff; width: 200px; text-align: center; margin-bottom: 20px; }
-        button { padding: 12px 40px; background: #00ffcc; color: #000; border: none; cursor: pointer; font-weight: bold; border-radius: 50px; }
+        .lobby-content { text-align: center; color: #00ff88; border: 2px solid #004d2c; padding: 60px; border-radius: 30px; background: rgba(0,0,0,0.8); box-shadow: 0 0 50px #004d2c; }
+        h1 { font-size: 4rem; letter-spacing: 10px; margin: 0 0 20px 0; text-shadow: 0 0 20px #00ff88; }
+        input { padding: 15px; background: #111; border: 1px solid #00ff88; color: #fff; width: 250px; text-align: center; font-size: 1.2rem; border-radius: 5px; margin-bottom: 20px; }
+        button { padding: 15px 50px; background: #004d2c; color: #fff; border: 1px solid #00ff88; cursor: pointer; font-weight: bold; font-size: 1.3rem; border-radius: 50px; transition: 0.3s; }
+        button:hover { background: #00ff88; color: #000; box-shadow: 0 0 30px #00ff88; }
     </style>
 </head>
 <body>
@@ -29,19 +32,19 @@
 <div id="lobby">
     <div class="lobby-content">
         <h1>SLITHERIN</h1>
-        <input type="text" id="nickname" placeholder="NAME..." maxlength="10">
+        <input type="text" id="nickname" placeholder="ENTER NAME..." maxlength="12">
         <br>
-        <button id="start-btn">JOIN GAME</button>
+        <button id="start-btn">JOIN HOUSE</button>
     </div>
 </div>
 
 <div id="ui">
     <div id="score-container">
         <div id="score-val">0</div>
-        <div style="opacity: 0.6;">Space to BOOST</div>
+        <div style="opacity: 0.6; color: #00ff88;">Space to BOOST</div>
     </div>
     <div id="leaderboard">
-        <div style="color: #ffcc00; font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid #555;">Leaderboard</div>
+        <div style="color: #00ff88; font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid #004d2c; text-align: center;">TOP AMBITIONS</div>
         <div id="rank-list"></div>
     </div>
 </div>
@@ -54,89 +57,136 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const socket = io();
 
-const WORLD_SIZE = 4000;
+const WORLD_SIZE = 5000;
 let width, height, player;
 let otherSnakes = {};
+let foods = [];
 let camera = { x: 0, y: 0 };
 let mouse = { x: 0, y: 0, pressed: false };
 
 class Snake {
-    constructor(name, color, isPlayer = false) {
+    constructor(name, color, isMe = false) {
         this.name = name;
         this.color = color;
-        this.isPlayer = isPlayer;
+        this.isMe = isMe;
         this.init();
     }
     init() {
-        this.x = 500 + Math.random() * (WORLD_SIZE - 1000);
-        this.y = 500 + Math.random() * (WORLD_SIZE - 1000);
+        this.x = 1000 + Math.random() * (WORLD_SIZE - 2000);
+        this.y = 1000 + Math.random() * (WORLD_SIZE - 2000);
         this.segments = [];
-        this.length = 25;
-        this.radius = 12;
+        this.length = 30;
+        this.radius = 16;
         this.angle = Math.random() * Math.PI * 2;
-        this.speed = 3.5;
+        this.speed = 4;
         this.dead = false;
         this.score = 0;
-        this.invincible = 120;
         for (let i = 0; i < this.length; i++) this.segments.push({ x: this.x, y: this.y });
     }
     update() {
         if (this.dead) return;
-        if (this.invincible > 0) this.invincible--;
-        const canBoost = mouse.pressed && this.length > 15;
-        this.speed = canBoost ? 7 : 3.5;
-        if (canBoost) this.length -= 0.1;
+        
+        // 旋回バグ防止：滑らかな角度追従
+        const targetAngle = Math.atan2(mouse.y - height / 2, mouse.x - width / 2);
+        let diff = targetAngle - this.angle;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        this.angle += diff * 0.12;
 
-        this.angle = Math.atan2(mouse.y - height / 2, mouse.x - width / 2);
-        const newHead = {
-            x: this.segments[0].x + Math.cos(this.angle) * this.speed,
-            y: this.segments[0].y + Math.sin(this.angle) * this.speed
-        };
+        const boost = mouse.pressed && this.length > 20;
+        this.speed = boost ? 8 : 4;
+        if (boost) this.length -= 0.08;
 
-        if (newHead.x < 0 || newHead.x > WORLD_SIZE || newHead.y < 0 || newHead.y > WORLD_SIZE) { this.dead = true; return; }
+        const nextX = this.segments[0].x + Math.cos(this.angle) * this.speed;
+        const nextY = this.segments[0].y + Math.sin(this.angle) * this.speed;
 
-        this.segments.unshift(newHead);
+        // 境界線衝突
+        if (nextX < 0 || nextX > WORLD_SIZE || nextY < 0 || nextY > WORLD_SIZE) {
+            this.dead = true;
+            location.reload(); // 簡易リスポーン
+            return;
+        }
+
+        this.segments.unshift({ x: nextX, y: nextY });
         if (this.segments.length > this.length) this.segments.pop();
+        this.x = nextX; this.y = nextY;
         this.score = Math.floor(this.length * 10);
-        this.x = newHead.x; this.y = newHead.y;
+        
+        // 餌の捕食
+        foods = foods.filter(f => {
+            if (Math.hypot(this.x - f.x, this.y - f.y) < this.radius + f.s) {
+                this.length += f.v;
+                return false;
+            }
+            return true;
+        });
     }
     draw(isMe = false) {
         ctx.save();
-        if (this.invincible > 0) ctx.globalAlpha = 0.5;
-        ctx.strokeStyle = isMe ? this.color : "#silver";
-        ctx.lineWidth = this.radius * 2;
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        if(this.segments.length > 0) {
-            ctx.moveTo(this.segments[0].x - camera.x, this.segments[0].y - camera.y);
-            this.segments.forEach(seg => ctx.lineTo(seg.x - camera.x, seg.y - camera.y));
+        // 体の描画（後ろから描画して重なりを補正）
+        for (let i = this.segments.length - 1; i >= 0; i--) {
+            if (i % 2 !== 0 && i !== 0) continue; // 描画負荷軽減と見た目の維持
+            const s = this.segments[i];
+            ctx.fillStyle = isMe ? this.color : "#444";
+            ctx.beginPath();
+            ctx.arc(s.x - camera.x, s.y - camera.y, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "rgba(0,0,0,0.2)";
             ctx.stroke();
         }
+        // 頭部と名前
+        const h = this.segments[0];
         ctx.fillStyle = "white";
-        ctx.fillText(this.name, this.segments[0].x - camera.x, this.segments[0].y - camera.y - 20);
+        ctx.font = "bold 14px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(this.name, h.x - camera.x, h.y - camera.y - this.radius - 10);
+        // 目
+        ctx.fillStyle = "#000";
+        ctx.beginPath();
+        ctx.arc(h.x - camera.x + Math.cos(this.angle+0.5)*10, h.y - camera.y + Math.sin(this.angle+0.5)*10, 3, 0, Math.PI*2);
+        ctx.arc(h.x - camera.x + Math.cos(this.angle-0.5)*10, h.y - camera.y + Math.sin(this.angle-0.5)*10, 3, 0, Math.PI*2);
+        ctx.fill();
         ctx.restore();
     }
 }
 
-function resize() {
-    width = canvas.width = window.innerWidth;
-    height = canvas.height = window.innerHeight;
+class Food {
+    constructor() {
+        this.x = Math.random() * WORLD_SIZE;
+        this.y = Math.random() * WORLD_SIZE;
+        const r = Math.random();
+        if (r > 0.98) { this.s = 15; this.v = 8; this.c = "#ff00ff"; } // レア大
+        else if (r > 0.85) { this.s = 8; this.v = 3; this.c = "#00ffff"; } // 中
+        else { this.s = 5; this.v = 1; this.c = `hsl(${Math.random()*360}, 70%, 50%)`; } // 小
+    }
+    draw() {
+        ctx.fillStyle = this.c;
+        ctx.beginPath();
+        ctx.arc(this.x - camera.x, this.y - camera.y, this.s, 0, Math.PI*2);
+        ctx.fill();
+    }
 }
 
+function resize() { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; }
+window.onresize = resize;
+resize();
+
+document.getElementById('nickname').value = localStorage.getItem('sl-nick') || "";
 document.getElementById('start-btn').onclick = () => {
-    const nick = document.getElementById('nickname').value || "Snake";
-    localStorage.setItem('slitherin-nick', nick);
+    const n = document.getElementById('nickname').value || "Slytherin";
+    localStorage.setItem('sl-nick', n);
     document.getElementById('lobby').style.display = 'none';
-    player = new Snake(nick, "#00ffcc", true);
-    socket.emit('join', { name: nick });
+    player = new Snake(n, "#00ff88", true);
+    for(let i=0; i<300; i++) foods.push(new Food());
+    socket.emit('join', { name: n });
     loop();
 };
 
-socket.on('updatePlayers', data => { otherSnakes = data; });
+socket.on('updatePlayers', d => { otherSnakes = d; });
 
 function loop() {
-    if (player.dead) { document.getElementById('lobby').style.display = 'flex'; return; }
-    ctx.fillStyle = "#0a0a0a";
+    if (player.dead) return;
+    ctx.fillStyle = "#050505";
     ctx.fillRect(0, 0, width, height);
 
     player.update();
@@ -144,31 +194,36 @@ function loop() {
     camera.y = player.y - height / 2;
 
     // グリッド
-    ctx.strokeStyle = "#1a1a1a";
-    for (let x = -camera.x % 100; x < width; x += 100) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,height); ctx.stroke(); }
-    for (let y = -camera.y % 100; y < height; y += 100) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(width,y); ctx.stroke(); }
+    ctx.strokeStyle = "#001a0d";
+    for (let x = -camera.x % 150; x < width; x += 150) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,height); ctx.stroke(); }
+    for (let y = -camera.y % 150; y < height; y += 150) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(width,y); ctx.stroke(); }
 
-    // 他のプレイヤー描画
+    // 境界線（赤い魔力の壁）
+    ctx.strokeStyle = "#ff0000"; ctx.lineWidth = 15;
+    ctx.strokeRect(-camera.x, -camera.y, WORLD_SIZE, WORLD_SIZE);
+    ctx.lineWidth = 1;
+
+    foods.forEach(f => f.draw());
+    if (foods.length < 300) foods.push(new Food());
+
     for (let id in otherSnakes) {
         if (id === socket.id) continue;
-        const p = otherSnakes[id];
-        ctx.strokeStyle = "silver";
-        ctx.lineWidth = 24;
-        ctx.beginPath();
-        if(p.segments?.length > 0) {
-            ctx.moveTo(p.segments[0].x - camera.x, p.segments[0].y - camera.y);
-            p.segments.forEach(s => ctx.lineTo(s.x - camera.x, s.y - camera.y));
-            ctx.stroke();
-        }
+        const o = otherSnakes[id];
+        ctx.fillStyle = "#333";
+        o.segments?.forEach((s, i) => {
+            if (i % 2 === 0) {
+                ctx.beginPath(); ctx.arc(s.x - camera.x, s.y - camera.y, 16, 0, Math.PI*2); ctx.fill();
+            }
+        });
     }
 
     player.draw(true);
 
-    // ランキング表示（あなたの提示コード準拠）
-    const all = [{name: player.name, score: player.score, isMe: true}, ...Object.values(otherSnakes).filter(s => s.id !== socket.id)];
-    const list = all.sort((a,b) => b.score - a.score).slice(0, 7);
+    // ランキング
+    const all = [{name: player.name, score: player.score, me: true}, ...Object.values(otherSnakes).filter(s=>s.id !== socket.id)];
+    const list = all.sort((a,b) => b.score - a.score).slice(0, 10);
     document.getElementById('rank-list').innerHTML = list.map((s, i) => `
-        <div class="rank-row" style="color: ${s.isMe ? '#00ffcc' : 'white'}">
+        <div class="rank-row" style="color: ${s.me ? '#00ff88' : '#ccc'}">
             <span>#${i + 1} ${s.name}</span><span>${s.score || 0}</span>
         </div>`).join('');
     
@@ -182,8 +237,6 @@ window.addEventListener('mousedown', () => mouse.pressed = true);
 window.addEventListener('mouseup', () => mouse.pressed = false);
 window.addEventListener('keydown', e => { if (e.code === "Space") mouse.pressed = true; });
 window.addEventListener('keyup', e => { if (e.code === "Space") mouse.pressed = false; });
-window.onresize = resize;
-resize();
 </script>
 </body>
 </html>
