@@ -1,129 +1,93 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>新しいタブ</title>
+    <title>Slitherin Online</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #050505; font-family: 'Georgia', serif; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'serif'; }
         canvas { display: block; }
         #lobby {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 15, 10, 0.9); display: flex; justify-content: center; align-items: center; z-index: 100;
+            background: rgba(0, 20, 10, 0.9); display: flex; justify-content: center; align-items: center; z-index: 100;
         }
-        .lobby-content {
-            text-align: center; color: #ccc; border: 2px solid #004d2c; padding: 40px; border-radius: 15px;
-            box-shadow: 0 0 30px rgba(0, 255, 120, 0.2); background: #000;
-        }
-        h1 { color: #00ff88; font-size: 3.5rem; letter-spacing: 8px; margin-bottom: 10px; }
-        input { 
-            padding: 12px; background: #111; border: 1px solid #004d2c; 
-            color: #fff; margin-bottom: 20px; width: 250px; text-align: center; font-size: 1.1rem;
-        }
-        button {
-            width: 100%; padding: 15px; background: #004d2c; color: white; 
-            border: none; cursor: pointer; font-weight: bold; font-size: 1.2rem; transition: 0.3s;
-        }
-        button:hover { background: #008855; box-shadow: 0 0 15px #00ff88; }
-        #ui { position: fixed; top: 20px; left: 20px; color: #00ff88; font-size: 20px; pointer-events: none; }
-        #rank { position: fixed; top: 20px; right: 20px; color: white; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; }
+        .content { text-align: center; color: #00ff88; border: 2px solid #004d2c; padding: 50px; border-radius: 20px; }
+        input { padding: 10px; background: #111; border: 1px solid #004d2c; color: #fff; width: 200px; margin-bottom: 20px; }
+        button { padding: 10px 30px; background: #004d2c; color: #fff; border: none; cursor: pointer; font-weight: bold; }
+        #ui { position: fixed; top: 20px; left: 20px; color: #00ff88; font-size: 24px; pointer-events: none; }
     </style>
 </head>
 <body>
-
 <div id="lobby">
-    <div class="lobby-content">
+    <div class="content">
         <h1>SLITHERIN</h1>
-        <p>野心を抱き、頂点を目指せ</p>
-        <input type="text" id="nickname" placeholder="ニックネーム..." maxlength="12">
-        <button id="start-btn">入寮する</button>
+        <input type="text" id="nickname" placeholder="Name..." maxlength="12">
+        <button id="start-btn">START</button>
     </div>
 </div>
-
 <div id="ui">Score: <span id="score-val">0</span></div>
-<div id="rank"></div>
 <canvas id="game"></canvas>
 
 <script src="https://cdn.socket.io"></script>
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const SERVER_URL = "https://your-app-name.onrender.com"; // Renderデプロイ後に書き換え
-const socket = io(SERVER_URL);
+const socket = io(); // Render上では空でOK
 
-let width, height;
-let player = { id: null, name: "", x: 2500, y: 2500, segments: [], radius: 15, length: 20, score: 0, dead: false };
-let otherSnakes = {};
-let foods = [];
+let player = { id: null, name: "", x: 2500, y: 2500, segments: [], radius: 15, length: 25, score: 0, dead: false };
+let others = {};
 let particles = [];
 let camera = { x: 0, y: 0 };
 let mouse = { x: 0, y: 0, pressed: false };
 
-function init() {
-    resize();
-    const savedName = localStorage.getItem('slitherin-nick');
-    if (savedName) document.getElementById('nickname').value = savedName;
-}
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+window.onresize = resize;
+resize();
+
+// ニックネーム復元
+document.getElementById('nickname').value = localStorage.getItem('slitherin-nick') || "";
 
 document.getElementById('start-btn').onclick = () => {
-    player.name = document.getElementById('nickname').value || "名無しの蛇";
+    player.name = document.getElementById('nickname').value || "Snake";
     localStorage.setItem('slitherin-nick', player.name);
     document.getElementById('lobby').style.display = 'none';
-    player.dead = false;
     socket.emit('join', { name: player.name });
     loop();
 };
 
-function resize() {
-    width = canvas.width = window.innerWidth;
-    height = canvas.height = window.innerHeight;
-}
-
-class Particle {
-    constructor(x, y, color) {
-        this.x = x; this.y = y; this.color = color;
-        this.size = Math.random() * 4 + 1;
-        this.life = 1.0;
-        this.vx = (Math.random() - 0.5) * 2;
-        this.vy = (Math.random() - 0.5) * 2;
-    }
-    update() { this.x += this.vx; this.y += this.vy; this.life -= 0.03; }
-    draw() {
-        ctx.globalAlpha = this.life;
-        ctx.fillStyle = this.color;
-        ctx.beginPath(); ctx.arc(this.x - camera.x, this.y - camera.y, this.size, 0, Math.PI*2); ctx.fill();
-        ctx.globalAlpha = 1;
-    }
-}
+socket.on('playerMoved', data => { others[data.id] = data; });
+socket.on('playerDisconnected', id => { delete others[id]; });
 
 function loop() {
-    if (player.dead) return;
-    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // カメラ更新
-    camera.x = player.x - width / 2;
-    camera.y = player.y - height / 2;
+    camera.x = player.x - canvas.width / 2;
+    camera.y = player.y - canvas.height / 2;
 
-    // グリッド描画
-    ctx.strokeStyle = "rgba(0, 128, 80, 0.15)";
-    for (let x = -camera.x % 100; x < width; x += 100) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke(); }
-    for (let y = -camera.y % 100; y < height; y += 100) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke(); }
-
-    // 自機の移動計算
-    const dx = mouse.x - width/2;
-    const dy = mouse.y - height/2;
-    const angle = Math.atan2(dy, dx);
-    const speed = mouse.pressed ? 6 : 3;
-
+    // 移動計算
+    const angle = Math.atan2(mouse.y - canvas.height/2, mouse.x - canvas.width/2);
+    const speed = mouse.pressed ? 7 : 4;
     player.x += Math.cos(angle) * speed;
     player.y += Math.sin(angle) * speed;
 
-    // 体の節更新
     player.segments.unshift({x: player.x, y: player.y});
     if (player.segments.length > player.length) player.segments.pop();
 
+    // 自滅判定の修正 (頭と15節以降のみ判定 = 自分にはぶつからない)
+    // 完全に自分をすり抜けたい場合はこのループを消す
+
     // ブーストエフェクト
     if (mouse.pressed) {
-        const tail = player.segments[player.segments.length - 1];
-        particles.push(new Particle(tail.x, tail.y, Math.random() > 0.5 ? "#00ff88" : "#c0c0c0"));
+        particles.push({x: player.x, y: player.y, l: 1.0, c: "#00ff88"});
+        player.score += 1;
+        document.getElementById('score-val').innerText = player.score;
+    }
+
+    // 描画：他プレイヤー
+    for (let id in others) {
+        ctx.fillStyle = "#c0c0c0";
+        others[id].segments.forEach(s => {
+            ctx.beginPath(); ctx.arc(s.x - camera.x, s.y - camera.y, 15, 0, Math.PI*2); ctx.fill();
+        });
     }
 
     // 描画：自分
@@ -132,19 +96,23 @@ function loop() {
         ctx.beginPath(); ctx.arc(s.x - camera.x, s.y - camera.y, player.radius, 0, Math.PI*2); ctx.fill();
     });
 
-    // 描画：エフェクト
-    particles = particles.filter(p => p.life > 0);
-    particles.forEach(p => { p.update(); p.draw(); });
+    // パーティクル
+    particles.forEach((p, i) => {
+        p.l -= 0.02;
+        ctx.globalAlpha = p.l;
+        ctx.fillStyle = p.c;
+        ctx.beginPath(); ctx.arc(p.x - camera.x, p.y - camera.y, 3, 0, Math.PI*2); ctx.fill();
+        if (p.l <= 0) particles.splice(i, 1);
+    });
+    ctx.globalAlpha = 1;
 
-    socket.emit('move', { x: player.x, y: player.y, segments: player.segments });
+    socket.emit('move', { x: player.x, y: player.y, segments: player.segments, score: player.score });
     requestAnimationFrame(loop);
 }
 
 window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
 window.addEventListener('mousedown', () => mouse.pressed = true);
 window.addEventListener('mouseup', () => mouse.pressed = false);
-window.onresize = resize;
-init();
 </script>
 </body>
 </html>
