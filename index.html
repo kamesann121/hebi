@@ -6,7 +6,6 @@
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: 'Helvetica', sans-serif; }
         canvas { display: block; }
-        /* シンプルなオーバーレイ設定 */
         .overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0, 0, 0, 0.9); display: flex; flex-direction: column;
@@ -22,25 +21,29 @@
             cursor: pointer; font-size: 16px; letter-spacing: 2px; transition: 0.2s;
         }
         button:hover { background: #00ff88; color: #000; }
-        
         #ui { position: fixed; top: 20px; left: 20px; color: #00ff88; font-size: 24px; pointer-events: none; }
         #leaderboard {
             position: absolute; top: 20px; right: 20px;
             background: rgba(0, 0, 0, 0.5); padding: 10px; min-width: 150px; color: #fff; font-size: 12px;
         }
         .rank-row { display: flex; justify-content: space-between; margin: 2px 0; }
+        #minimap-container {
+            position: absolute; top: 160px; right: 20px;
+            width: 150px; height: 150px;
+            background: rgba(0, 40, 20, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 50%;
+            overflow: hidden; pointer-events: none;
+        }
     </style>
 </head>
 <body>
 
-<!-- ホーム画面（初期表示） -->
 <div id="lobby" class="overlay">
     <h1>SLITHERIN</h1>
     <input type="text" id="nickname" placeholder="NICKNAME" maxlength="10">
     <button id="start-btn">START</button>
 </div>
 
-<!-- 死亡画面（非表示） -->
 <div id="death-screen" class="overlay" style="display: none;">
     <h1 style="color: #ff3333;">WASTED</h1>
     <p id="final-score" style="font-size: 24px; margin-bottom: 20px;">Score: 0</p>
@@ -49,6 +52,7 @@
 
 <div id="ui">Score: <span id="score-val">0</span></div>
 <div id="leaderboard"><div id="rank-list"></div></div>
+<div id="minimap-container"><canvas id="minimap" width="150" height="150"></canvas></div>
 
 <canvas id="gameCanvas"></canvas>
 
@@ -98,13 +102,26 @@ class Snake {
         const nx = this.segments[0].x + Math.cos(this.angle) * this.speed;
         const ny = this.segments[0].y + Math.sin(this.angle) * this.speed;
 
+        // 境界線死
         if (nx < 0 || nx > WORLD_SIZE || ny < 0 || ny > WORLD_SIZE) { this.die(); return; }
+
+        // 他プレイヤーとの当たり判定
+        for (let id in otherSnakes) {
+            const enemy = otherSnakes[id];
+            if (!enemy.segments) continue;
+            for (let seg of enemy.segments) {
+                if (Math.hypot(nx - seg.x, ny - seg.y) < this.radius + 5) {
+                    this.die(); return;
+                }
+            }
+        }
 
         this.segments.unshift({ x: nx, y: ny });
         if (this.segments.length > this.length) this.segments.pop();
         this.x = nx; this.y = ny;
         this.score = Math.floor(this.length * 10);
         
+        // 捕食
         foods = foods.filter(f => {
             if (Math.hypot(this.x - f.x, this.y - f.y) < this.radius + f.s) {
                 this.length += f.v;
@@ -115,6 +132,8 @@ class Snake {
     }
     die() {
         this.dead = true;
+        // 死亡時にエサをばらまく情報をサーバーへ
+        socket.emit('died', { segments: this.segments });
         document.getElementById('final-score').innerText = `Score: ${this.score}`;
         document.getElementById('death-screen').style.display = 'flex';
     }
@@ -122,26 +141,24 @@ class Snake {
         ctx.save();
         for (let i = this.segments.length - 1; i >= 0; i--) {
             if (i % 2 !== 0 && i !== 0) continue;
-            const s = this.segments[i];
-            ctx.fillStyle = isMe ? this.color : "#333";
+            ctx.fillStyle = isMe ? this.color : "#666";
             ctx.beginPath();
-            ctx.arc(s.x - camera.x, s.y - camera.y, this.radius, 0, Math.PI * 2);
+            ctx.arc(this.segments[i].x - camera.x, this.segments[i].y - camera.y, this.radius, 0, Math.PI * 2);
             ctx.fill();
         }
-        ctx.fillStyle = "white";
-        ctx.textAlign = "center";
+        ctx.fillStyle = "white"; ctx.textAlign = "center";
         ctx.fillText(this.name, this.segments[0].x - camera.x, this.segments[0].y - camera.y - 20);
         ctx.restore();
     }
 }
 
 class Food {
-    constructor() {
-        this.x = Math.random() * WORLD_SIZE;
-        this.y = Math.random() * WORLD_SIZE;
-        const r = Math.random();
-        if (r > 0.95) { this.s = 10; this.v = 5; this.c = "#ff00ff"; }
-        else { this.s = 4; this.v = 1; this.c = "#00ff88"; }
+    constructor(x, y, v, s, c) {
+        this.x = x || Math.random() * WORLD_SIZE;
+        this.y = y || Math.random() * WORLD_SIZE;
+        this.v = v || 1;
+        this.s = s || 4;
+        this.c = c || "#00ff88";
     }
     draw() {
         ctx.fillStyle = this.c;
@@ -160,11 +177,9 @@ function startGame() {
     document.getElementById('death-screen').style.display = 'none';
     if (!player) {
         player = new Snake(n, "#00ff88");
-        for(let i=0; i<200; i++) foods.push(new Food());
+        for(let i=0; i<300; i++) foods.push(new Food());
         loop();
-    } else {
-        player.init();
-    }
+    } else { player.init(); }
     socket.emit('join', { name: n });
 }
 
@@ -172,45 +187,57 @@ document.getElementById('start-btn').onclick = startGame;
 document.getElementById('retry-btn').onclick = startGame;
 
 socket.on('updatePlayers', d => { otherSnakes = d; });
+// 誰かが死んだときにエサを追加
+socket.on('spawnFoods', data => {
+    data.forEach(f => foods.push(new Food(f.x, f.y, 2, 6, "#ff00ff")));
+});
 
 function loop() {
-    ctx.fillStyle = "#050505";
-    ctx.fillRect(0, 0, width, height);
-
+    ctx.fillStyle = "#050505"; ctx.fillRect(0, 0, width, height);
     if (!player.dead) {
         player.update();
         camera.x = player.x - width / 2;
         camera.y = player.y - height / 2;
     }
-
-    // 境界線
+    // 境界
     ctx.strokeStyle = "#ff0000"; ctx.lineWidth = 10;
     ctx.strokeRect(-camera.x, -camera.y, WORLD_SIZE, WORLD_SIZE);
 
     foods.forEach(f => f.draw());
-    if (foods.length < 200) foods.push(new Food());
+    if (foods.length < 300) foods.push(new Food());
 
     for (let id in otherSnakes) {
         if (id === socket.id) continue;
         const o = otherSnakes[id];
-        ctx.fillStyle = "#222";
+        ctx.fillStyle = "#444";
         o.segments?.forEach((s, i) => {
-            if (i % 2 === 0) {
-                ctx.beginPath(); ctx.arc(s.x - camera.x, s.y - camera.y, 14, 0, Math.PI*2); ctx.fill();
-            }
+            if (i % 2 === 0) { ctx.beginPath(); ctx.arc(s.x - camera.x, s.y - camera.y, 14, 0, Math.PI*2); ctx.fill(); }
         });
     }
-
     player.draw(true);
 
-    const all = [{name: player.name, score: player.score, me: true}, ...Object.values(otherSnakes).filter(s=>s.id !== socket.id)];
-    const list = all.sort((a,b) => b.score - a.score).slice(0, 5);
+    const all = [{name: player.name, score: player.score, me: true, x: player.x, y: player.y}, ...Object.values(otherSnakes).filter(s=>s.id !== socket.id)];
+    const list = all.sort((a,b) => (b.score||0) - (a.score||0)).slice(0, 5);
     document.getElementById('rank-list').innerHTML = list.map((s, i) => `
         <div class="rank-row" style="color: ${s.me ? '#00ff88' : '#888'}">
             <span>#${i + 1} ${s.name}</span><span>${s.score || 0}</span>
         </div>`).join('');
     
     document.getElementById('score-val').innerText = player.score;
+
+    // ミニマップ
+    const mCtx = document.getElementById('minimap').getContext('2d');
+    const sc = 150 / WORLD_SIZE;
+    mCtx.clearRect(0, 0, 150, 150);
+    mCtx.strokeStyle = "rgba(255, 0, 0, 0.5)"; mCtx.strokeRect(0,0,150,150);
+    for(let id in otherSnakes) {
+        const o = otherSnakes[id];
+        if(o.segments && o.segments.length > 0) {
+            mCtx.fillStyle = "#ff3333"; mCtx.beginPath(); mCtx.arc(o.segments[0].x*sc, o.segments[0].y*sc, 2, 0, Math.PI*2); mCtx.fill();
+        }
+    }
+    mCtx.fillStyle = "#fff"; mCtx.beginPath(); mCtx.arc(player.x*sc, player.y*sc, 3, 0, Math.PI*2); mCtx.fill();
+
     socket.emit('move', { segments: player.segments, score: player.score });
     requestAnimationFrame(loop);
 }
