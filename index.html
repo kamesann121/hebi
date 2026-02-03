@@ -63,54 +63,60 @@ const ctx = canvas.getContext('2d');
 const socket = io();
 
 const WORLD_SIZE = 4000;
+const BOT_COUNT = 8; // ボットの数
+const BOT_NAMES = ["Darkness", "Phantom", "Sly", "Shadow", "Viper", "Cobra", "Basilisk", "Naga"];
 let width, height, player;
 let otherSnakes = {};
+let bots = [];
 let foods = [];
 let camera = { x: 0, y: 0 };
 let mouse = { x: 0, y: 0, pressed: false };
 
 class Snake {
-    constructor(name, color) {
-        this.name = name;
-        this.color = color;
+    constructor(name, color, isPlayer = false, isBot = false) {
+        this.name = name; this.color = color;
+        this.isPlayer = isPlayer; this.isBot = isBot;
         this.init();
     }
     init() {
         this.x = 500 + Math.random() * (WORLD_SIZE - 1000);
         this.y = 500 + Math.random() * (WORLD_SIZE - 1000);
-        this.segments = [];
-        this.length = 25;
-        this.radius = 14;
-        this.angle = Math.random() * Math.PI * 2;
-        this.speed = 4;
-        this.dead = false;
-        this.score = 0;
+        this.segments = []; this.length = 25; this.radius = 14;
+        this.angle = Math.random() * Math.PI * 2; this.speed = 3.5;
+        this.dead = false; this.score = 0;
         for (let i = 0; i < this.length; i++) this.segments.push({ x: this.x, y: this.y });
     }
     update() {
         if (this.dead) return;
-        const targetAngle = Math.atan2(mouse.y - height / 2, mouse.x - width / 2);
-        let diff = targetAngle - this.angle;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        this.angle += diff * 0.15;
+        if (this.isPlayer) {
+            const targetAngle = Math.atan2(mouse.y - height / 2, mouse.x - width / 2);
+            let diff = targetAngle - this.angle;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            this.angle += diff * 0.15;
+        } else if (this.isBot) {
+            // ボットのAI
+            if (Math.random() < 0.02) this.angle += (Math.random() - 0.5) * 2;
+            if (this.x < 200 || this.x > WORLD_SIZE - 200 || this.y < 200 || this.y > WORLD_SIZE - 200) this.angle += 0.15;
+        }
 
-        const boost = mouse.pressed && this.length > 20;
-        this.speed = boost ? 8 : 4;
+        const boost = (this.isPlayer && mouse.pressed) && this.length > 20;
+        this.speed = boost ? 7 : 3.5;
         if (boost) this.length -= 0.05;
 
         const nx = this.segments[0].x + Math.cos(this.angle) * this.speed;
         const ny = this.segments[0].y + Math.sin(this.angle) * this.speed;
 
-        // 境界線死
         if (nx < 0 || nx > WORLD_SIZE || ny < 0 || ny > WORLD_SIZE) { this.die(); return; }
 
-        // 他プレイヤーとの当たり判定
-        for (let id in otherSnakes) {
-            const enemy = otherSnakes[id];
-            if (!enemy.segments) continue;
-            for (let seg of enemy.segments) {
-                if (Math.hypot(nx - seg.x, ny - seg.y) < this.radius + 5) {
+        // 当たり判定 (自分、他プレイヤー、ボットすべて)
+        const allEnemies = [...Object.values(otherSnakes), ...bots.filter(b => b !== this)];
+        if (this.isPlayer) allEnemies.push(...bots); // プレイヤー視点ではボットも敵
+        
+        for (let enemy of allEnemies) {
+            if (!enemy.segments || enemy.dead) continue;
+            for (let i = 0; i < enemy.segments.length; i++) {
+                if (Math.hypot(nx - enemy.segments[i].x, ny - enemy.segments[i].y) < this.radius + 5) {
                     this.die(); return;
                 }
             }
@@ -118,65 +124,71 @@ class Snake {
 
         this.segments.unshift({ x: nx, y: ny });
         if (this.segments.length > this.length) this.segments.pop();
-        this.x = nx; this.y = ny;
-        this.score = Math.floor(this.length * 10);
+        this.x = nx; this.y = ny; this.score = Math.floor(this.length * 10);
         
-        // 捕食
         foods = foods.filter(f => {
             if (Math.hypot(this.x - f.x, this.y - f.y) < this.radius + f.s) {
-                this.length += f.v;
-                return false;
+                this.length += f.v; return false;
             }
             return true;
         });
     }
     die() {
         this.dead = true;
-        // 死亡時にエサをばらまく情報をサーバーへ
-        socket.emit('died', { segments: this.segments });
-        document.getElementById('final-score').innerText = `Score: ${this.score}`;
-        document.getElementById('death-screen').style.display = 'flex';
+        if (this.isPlayer) {
+            socket.emit('died', { segments: this.segments });
+            document.getElementById('final-score').innerText = `Score: ${this.score}`;
+            document.getElementById('death-screen').style.display = 'flex';
+        } else if (this.isBot) {
+            // ボットが死んだらエサを撒いてリスポーン
+            this.segments.forEach((s, i) => { if(i%5===0) foods.push(new Food(s.x, s.y, true)); });
+            setTimeout(() => this.init(), 3000);
+        }
     }
     draw(isMe) {
+        if (this.dead) return;
         ctx.save();
         for (let i = this.segments.length - 1; i >= 0; i--) {
             if (i % 2 !== 0 && i !== 0) continue;
-            ctx.fillStyle = isMe ? this.color : "#666";
-            ctx.beginPath();
-            ctx.arc(this.segments[i].x - camera.x, this.segments[i].y - camera.y, this.radius, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillStyle = isMe ? this.color : (this.isBot ? "#2a2a2a" : "#444");
+            ctx.beginPath(); ctx.arc(this.segments[i].x - camera.x, this.segments[i].y - camera.y, this.radius, 0, Math.PI * 2); ctx.fill();
         }
-        ctx.fillStyle = "white"; ctx.textAlign = "center";
+        ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.textAlign = "center";
         ctx.fillText(this.name, this.segments[0].x - camera.x, this.segments[0].y - camera.y - 20);
         ctx.restore();
     }
 }
 
 class Food {
-    constructor(x, y, v, s, c) {
-        this.x = x || Math.random() * WORLD_SIZE;
-        this.y = y || Math.random() * WORLD_SIZE;
-        this.v = v || 1;
-        this.s = s || 4;
-        this.c = c || "#00ff88";
+    constructor(x, y, isSpecial = false) {
+        this.x = x || Math.random() * WORLD_SIZE; this.y = y || Math.random() * WORLD_SIZE;
+        this.pulse = Math.random() * 10;
+        const r = Math.random();
+        if (isSpecial) { this.s = 8; this.v = 4; this.c = "#ffffff"; this.glow = true; }
+        else if (r > 0.98) { this.s = 15; this.v = 15; this.c = "#00ff88"; this.glow = true; }
+        else if (r > 0.85) { this.s = 9; this.v = 5; this.c = "#bf00ff"; this.glow = true; }
+        else { this.s = 4; this.v = 1; this.c = `hsl(${Math.random()*360}, 80%, 60%)`; this.glow = false; }
     }
     draw() {
-        ctx.fillStyle = this.c;
-        ctx.beginPath(); ctx.arc(this.x - camera.x, this.y - camera.y, this.s, 0, Math.PI*2); ctx.fill();
+        this.pulse += 0.1; let drawSize = this.s + (this.glow ? Math.sin(this.pulse) * 2 : 0);
+        ctx.save(); ctx.fillStyle = this.c;
+        if (this.glow) { ctx.shadowBlur = 15; ctx.shadowColor = this.c; }
+        ctx.beginPath(); ctx.arc(this.x - camera.x, this.y - camera.y, drawSize, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
     }
 }
 
 function resize() { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; }
-window.onresize = resize;
-resize();
+window.onresize = resize; resize();
 
 function startGame() {
-    const n = document.getElementById('nickname').value || "Slytherin";
+    const n = document.getElementById('nickname').value || "Snake";
     localStorage.setItem('sl-nick', n);
     document.getElementById('lobby').style.display = 'none';
     document.getElementById('death-screen').style.display = 'none';
     if (!player) {
-        player = new Snake(n, "#00ff88");
+        player = new Snake(n, "#00ff88", true);
+        for(let i=0; i<BOT_COUNT; i++) bots.push(new Snake(BOT_NAMES[i], "#333", false, true));
         for(let i=0; i<300; i++) foods.push(new Food());
         loop();
     } else { player.init(); }
@@ -185,63 +197,48 @@ function startGame() {
 
 document.getElementById('start-btn').onclick = startGame;
 document.getElementById('retry-btn').onclick = startGame;
-
 socket.on('updatePlayers', d => { otherSnakes = d; });
-// 誰かが死んだときにエサを追加
-socket.on('spawnFoods', data => {
-    data.forEach(f => foods.push(new Food(f.x, f.y, 2, 6, "#ff00ff")));
-});
+socket.on('spawnFoods', data => { data.forEach(f => foods.push(new Food(f.x, f.y, true))); });
 
 function loop() {
     ctx.fillStyle = "#050505"; ctx.fillRect(0, 0, width, height);
     if (!player.dead) {
         player.update();
-        camera.x = player.x - width / 2;
-        camera.y = player.y - height / 2;
+        camera.x = player.x - width / 2; camera.y = player.y - height / 2;
     }
-    // 境界
     ctx.strokeStyle = "#ff0000"; ctx.lineWidth = 10;
     ctx.strokeRect(-camera.x, -camera.y, WORLD_SIZE, WORLD_SIZE);
 
     foods.forEach(f => f.draw());
     if (foods.length < 300) foods.push(new Food());
 
+    bots.forEach(b => { b.update(); b.draw(false); });
     for (let id in otherSnakes) {
         if (id === socket.id) continue;
         const o = otherSnakes[id];
         ctx.fillStyle = "#444";
-        o.segments?.forEach((s, i) => {
-            if (i % 2 === 0) { ctx.beginPath(); ctx.arc(s.x - camera.x, s.y - camera.y, 14, 0, Math.PI*2); ctx.fill(); }
-        });
+        o.segments?.forEach((s, i) => { if (i % 2 === 0) { ctx.beginPath(); ctx.arc(s.x - camera.x, s.y - camera.y, 14, 0, Math.PI*2); ctx.fill(); } });
     }
     player.draw(true);
 
-    const all = [{name: player.name, score: player.score, me: true, x: player.x, y: player.y}, ...Object.values(otherSnakes).filter(s=>s.id !== socket.id)];
+    const all = [{name: player.name, score: player.score, me: true}, ...bots, ...Object.values(otherSnakes).filter(s=>s.id !== socket.id)];
     const list = all.sort((a,b) => (b.score||0) - (a.score||0)).slice(0, 5);
-    document.getElementById('rank-list').innerHTML = list.map((s, i) => `
-        <div class="rank-row" style="color: ${s.me ? '#00ff88' : '#888'}">
-            <span>#${i + 1} ${s.name}</span><span>${s.score || 0}</span>
-        </div>`).join('');
+    document.getElementById('rank-list').innerHTML = list.map((s, i) => `<div class="rank-row" style="color: ${s.me ? '#00ff88' : '#888'}"><span>#${i + 1} ${s.name}</span><span>${s.score || 0}</span></div>`).join('');
     
-    document.getElementById('score-val').innerText = player.score;
-
-    // ミニマップ
+    // ミニマップ描画 (ボットは非表示)
     const mCtx = document.getElementById('minimap').getContext('2d');
     const sc = 150 / WORLD_SIZE;
     mCtx.clearRect(0, 0, 150, 150);
     mCtx.strokeStyle = "rgba(255, 0, 0, 0.5)"; mCtx.strokeRect(0,0,150,150);
     for(let id in otherSnakes) {
         const o = otherSnakes[id];
-        if(o.segments && o.segments.length > 0) {
-            mCtx.fillStyle = "#ff3333"; mCtx.beginPath(); mCtx.arc(o.segments[0].x*sc, o.segments[0].y*sc, 2, 0, Math.PI*2); mCtx.fill();
-        }
+        if(o.segments?.length > 0) { mCtx.fillStyle = "#ff3333"; mCtx.beginPath(); mCtx.arc(o.segments[0].x*sc, o.segments[0].y*sc, 2, 0, Math.PI*2); mCtx.fill(); }
     }
     mCtx.fillStyle = "#fff"; mCtx.beginPath(); mCtx.arc(player.x*sc, player.y*sc, 3, 0, Math.PI*2); mCtx.fill();
 
     socket.emit('move', { segments: player.segments, score: player.score });
     requestAnimationFrame(loop);
 }
-
 window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
 window.addEventListener('mousedown', () => mouse.pressed = true);
 window.addEventListener('mouseup', () => mouse.pressed = false);
