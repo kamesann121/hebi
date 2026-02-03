@@ -4,122 +4,116 @@
     <meta charset="UTF-8">
     <title>新しいタブ</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'serif'; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Georgia', serif; }
         canvas { display: block; }
         #lobby {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 20, 10, 0.9); display: flex; justify-content: center; align-items: center; z-index: 100;
+            background: rgba(0, 15, 10, 0.95); display: flex; justify-content: center; align-items: center; z-index: 100;
         }
-        .content { text-align: center; color: #00ff88; border: 2px solid #004d2c; padding: 50px; border-radius: 20px; box-shadow: 0 0 20px #004d2c; }
-        h1 { font-size: 3rem; letter-spacing: 5px; margin-bottom: 20px; }
-        input { padding: 12px; background: #111; border: 1px solid #004d2c; color: #fff; width: 220px; margin-bottom: 20px; font-size: 1rem; text-align: center; }
-        button { padding: 12px 40px; background: #004d2c; color: #fff; border: none; cursor: pointer; font-weight: bold; font-size: 1.2rem; transition: 0.3s; }
-        button:hover { background: #008855; box-shadow: 0 0 15px #00ff88; }
-        #ui { position: fixed; top: 20px; left: 20px; color: #00ff88; font-size: 24px; pointer-events: none; text-shadow: 1px 1px 2px #000; }
+        .content { text-align: center; color: #00ff88; border: 2px solid #004d2c; padding: 40px; border-radius: 15px; }
+        input { padding: 12px; background: #111; border: 1px solid #004d2c; color: #fff; width: 200px; margin-bottom: 20px; text-align: center; }
+        button { padding: 12px 40px; background: #004d2c; color: #fff; border: none; cursor: pointer; font-weight: bold; }
+        #score-ui { position: fixed; top: 20px; left: 20px; color: #00ff88; font-size: 24px; pointer-events: none; }
+        #rank-list { 
+            position: fixed; top: 20px; right: 20px; color: white; background: rgba(0,0,0,0.6); 
+            padding: 15px; border-radius: 10px; font-family: monospace; min-width: 150px;
+        }
+        .rank-row { display: flex; justify-content: space-between; margin-bottom: 5px; gap: 20px; }
     </style>
 </head>
 <body>
+
 <div id="lobby">
     <div class="content">
         <h1>SLITHERIN</h1>
-        <input type="text" id="nickname" placeholder="名を入力せよ..." maxlength="12">
+        <input type="text" id="nickname" placeholder="名前を入力..." maxlength="10">
         <br>
         <button id="start-btn">入寮する</button>
     </div>
 </div>
-<div id="ui">Score: <span id="score-val">0</span></div>
+
+<div id="score-ui">Score: <span id="score-val">0</span></div>
+<div id="rank-list"></div>
 <canvas id="game"></canvas>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const socket = io(); 
+const socket = io();
 
-let player = { id: null, name: "", x: 2500, y: 2500, segments: [], radius: 15, length: 25, score: 0, dead: false, active: false };
-let others = {};
+let width, height;
+let player = { id: null, name: "", x: 2500, y: 2500, segments: [], radius: 15, length: 25, score: 0, dead: false, isPlayer: true };
+let snakes = []; // 自分、他プレイヤー、ボットすべて含める
+let foods = [];
 let particles = [];
 let camera = { x: 0, y: 0 };
 let mouse = { x: 0, y: 0, pressed: false };
+const FOOD_COUNT = 100;
 
-function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
-window.onresize = resize;
-resize();
+function resize() {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+}
 
-// ニックネーム復元
-document.getElementById('nickname').value = localStorage.getItem('slitherin-nick') || "";
+window.onload = () => {
+    resize();
+    document.getElementById('nickname').value = localStorage.getItem('slitherin-nick') || "";
+};
 
 document.getElementById('start-btn').onclick = () => {
     player.name = document.getElementById('nickname').value || "Snake";
     localStorage.setItem('slitherin-nick', player.name);
     document.getElementById('lobby').style.display = 'none';
-    
-    player.dead = false;
-    player.active = true;
-    
     socket.emit('join', { name: player.name });
-    requestAnimationFrame(loop); // スタート時にループ開始
+    snakes = [player]; // 自分の蛇をセット
+    loop();
 };
 
-socket.on('updatePlayers', data => {
-    // 自分以外のプレイヤーを登録
-    for(let id in data) {
-        if(id !== socket.id) others[id] = data[id];
-    }
+// サーバー通信
+socket.on('updatePlayers', (data) => {
+    // 既存のsnakesから他プレイヤーを更新、または追加
+    const otherIds = Object.keys(data).filter(id => id !== socket.id);
+    // 簡易的にsnakesを再構成
+    snakes = [player, ...otherIds.map(id => ({
+        ...data[id],
+        isPlayer: false // 自分以外
+    }))];
 });
 
-socket.on('playerMoved', data => { if(data.id !== socket.id) others[data.id] = data; });
-socket.on('playerDisconnected', id => { delete others[id]; });
-
 function loop() {
-    if (!player.active) return;
-    
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (player.dead) return;
+    ctx.clearRect(0, 0, width, height);
 
-    camera.x = player.x - canvas.width / 2;
-    camera.y = player.y - canvas.height / 2;
+    // カメラ
+    camera.x = player.x - width / 2;
+    camera.y = player.y - height / 2;
 
     // グリッド描画
-    ctx.strokeStyle = "rgba(0, 128, 80, 0.1)";
-    ctx.lineWidth = 1;
-    for (let x = -camera.x % 100; x < canvas.width; x += 100) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
-    for (let y = -camera.y % 100; y < canvas.height; y += 100) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+    ctx.strokeStyle = "rgba(0, 128, 80, 0.15)";
+    for (let x = -camera.x % 100; x < width; x += 100) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke(); }
+    for (let y = -camera.y % 100; y < height; y += 100) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke(); }
 
-    // 移動計算
-    const dx = mouse.x - canvas.width / 2;
-    const dy = mouse.y - canvas.height / 2;
+    // 自機の移動
+    const dx = mouse.x - width / 2;
+    const dy = mouse.y - height / 2;
     const angle = Math.atan2(dy, dx);
     const speed = mouse.pressed ? 7 : 4;
     
     player.x += Math.cos(angle) * speed;
     player.y += Math.sin(angle) * speed;
-
     player.segments.unshift({x: player.x, y: player.y});
     if (player.segments.length > player.length) player.segments.pop();
 
-    // ブーストエフェクト
+    // 自分の死を回避（自滅防止）
+    // 衝突判定はSnakeクラスまたはこのループで行う
+
+    // エフェクト更新と描画
     if (mouse.pressed) {
         particles.push({x: player.x, y: player.y, l: 1.0, c: "#00ff88"});
-        player.score += 1;
+        player.score = Math.floor(player.length * 10);
         document.getElementById('score-val').innerText = player.score;
     }
-
-    // 描画：他プレイヤー
-    for (let id in others) {
-        ctx.fillStyle = "#333"; // 他の人は暗めの色
-        others[id].segments.forEach(s => {
-            ctx.beginPath(); ctx.arc(s.x - camera.x, s.y - camera.y, 15, 0, Math.PI*2); ctx.fill();
-        });
-    }
-
-    // 描画：自分
-    ctx.fillStyle = "#00ff88";
-    player.segments.forEach(s => {
-        ctx.beginPath(); ctx.arc(s.x - camera.x, s.y - camera.y, player.radius, 0, Math.PI*2); ctx.fill();
-    });
-
-    // エフェクト描画
     particles.forEach((p, i) => {
         p.l -= 0.02;
         ctx.globalAlpha = p.l;
@@ -129,6 +123,21 @@ function loop() {
     });
     ctx.globalAlpha = 1;
 
+    // 描画と判定
+    snakes.forEach(s => {
+        ctx.fillStyle = s.isPlayer ? "#00ff88" : "#silver";
+        s.segments?.forEach(seg => {
+            ctx.beginPath(); ctx.arc(seg.x - camera.x, seg.y - camera.y, 15, 0, Math.PI*2); ctx.fill();
+        });
+    });
+
+    // ランキング（あなたの提示コードを反映）
+    const list = [...snakes].filter(s => !s.dead).sort((a, b) => b.score - a.score).slice(0, 7);
+    document.getElementById('rank-list').innerHTML = list.map((s, i) => `
+        <div class="rank-row" style="color: ${s.isPlayer ? '#00ffcc' : 'white'}">
+            <span>#${i + 1} ${s.name}</span><span>${s.score}</span>
+        </div>`).join('');
+
     socket.emit('move', { x: player.x, y: player.y, segments: player.segments, score: player.score });
     requestAnimationFrame(loop);
 }
@@ -136,6 +145,9 @@ function loop() {
 window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
 window.addEventListener('mousedown', () => mouse.pressed = true);
 window.addEventListener('mouseup', () => mouse.pressed = false);
+window.addEventListener('keydown', e => { if (e.code === "Space") mouse.pressed = true; });
+window.addEventListener('keyup', e => { if (e.code === "Space") mouse.pressed = false; });
+window.addEventListener('resize', resize);
 </script>
 </body>
 </html>
