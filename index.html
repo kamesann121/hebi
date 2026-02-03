@@ -2,17 +2,10 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Slitherin Online - Ultimate</title>
+    <title>新しいタブ</title></title>
     <style>
         body { margin: 0; overflow: hidden; background: #0a0a0a; font-family: 'Arial', sans-serif; }
         canvas { display: block; }
-        #lobby {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 15, 10, 0.95); display: flex; justify-content: center; align-items: center; z-index: 100;
-        }
-        .lobby-content { text-align: center; color: #00ffcc; border: 2px solid #004d2c; padding: 50px; border-radius: 20px; background: #000; }
-        input { padding: 12px; background: #111; border: 1px solid #00ffcc; color: #fff; width: 250px; text-align: center; font-size: 1.2rem; margin-bottom: 20px; }
-        button { padding: 15px 40px; background: #00ffcc; color: #000; border: none; cursor: pointer; font-weight: bold; font-size: 1.2rem; border-radius: 50px; }
         #ui { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; color: white; }
         #score-container { position: absolute; top: 20px; left: 20px; }
         #score-val { font-size: 36px; font-weight: bold; color: #00ffcc; }
@@ -22,6 +15,13 @@
             border: 1px solid #444; min-width: 180px;
         }
         .rank-row { display: flex; justify-content: space-between; font-size: 14px; margin: 4px 0; }
+        #lobby {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 15, 10, 0.95); display: flex; justify-content: center; align-items: center; z-index: 100; pointer-events: auto;
+        }
+        .lobby-content { text-align: center; color: #00ffcc; border: 2px solid #004d2c; padding: 50px; border-radius: 20px; background: #000; }
+        input { padding: 12px; background: #111; border: 1px solid #00ffcc; color: #fff; width: 200px; text-align: center; margin-bottom: 20px; }
+        button { padding: 12px 40px; background: #00ffcc; color: #000; border: none; cursor: pointer; font-weight: bold; border-radius: 50px; }
     </style>
 </head>
 <body>
@@ -29,7 +29,7 @@
 <div id="lobby">
     <div class="lobby-content">
         <h1>SLITHERIN</h1>
-        <input type="text" id="nickname" placeholder="Enter Name..." maxlength="10">
+        <input type="text" id="nickname" placeholder="NAME..." maxlength="10">
         <br>
         <button id="start-btn">JOIN GAME</button>
     </div>
@@ -55,22 +55,16 @@ const ctx = canvas.getContext('2d');
 const socket = io();
 
 const WORLD_SIZE = 4000;
-const BOT_COUNT = 10;
-const NAMES = ["Zilla", "Rex", "Shadow", "Venom", "Alpha", "Ghost", "Bolt", "Neon", "Ryu", "Buster"];
-
 let width, height, player;
-let snakes = [];
-let foods = [];
-let otherPlayers = {};
+let otherSnakes = {};
 let camera = { x: 0, y: 0 };
 let mouse = { x: 0, y: 0, pressed: false };
 
 class Snake {
-    constructor(name, color, isPlayer = false, id = null) {
+    constructor(name, color, isPlayer = false) {
         this.name = name;
         this.color = color;
         this.isPlayer = isPlayer;
-        this.id = id;
         this.init();
     }
     init() {
@@ -89,44 +83,35 @@ class Snake {
     update() {
         if (this.dead) return;
         if (this.invincible > 0) this.invincible--;
-        const boostActive = this.isPlayer ? (mouse.pressed) : (Math.random() < 0.01);
-        const canBoost = boostActive && this.length > 15;
+        const canBoost = mouse.pressed && this.length > 15;
         this.speed = canBoost ? 7 : 3.5;
         if (canBoost) this.length -= 0.1;
 
-        if (this.isPlayer) {
-            this.angle = Math.atan2(mouse.y - height / 2, mouse.x - width / 2);
-        } else {
-            if (Math.random() < 0.02) this.angle += (Math.random() - 0.5) * 2;
-        }
-
+        this.angle = Math.atan2(mouse.y - height / 2, mouse.x - width / 2);
         const newHead = {
             x: this.segments[0].x + Math.cos(this.angle) * this.speed,
             y: this.segments[0].y + Math.sin(this.angle) * this.speed
         };
 
-        if (newHead.x < 0 || newHead.x > WORLD_SIZE || newHead.y < 0 || newHead.y > WORLD_SIZE) { this.die(); return; }
+        if (newHead.x < 0 || newHead.x > WORLD_SIZE || newHead.y < 0 || newHead.y > WORLD_SIZE) { this.dead = true; return; }
 
         this.segments.unshift(newHead);
         if (this.segments.length > this.length) this.segments.pop();
         this.score = Math.floor(this.length * 10);
         this.x = newHead.x; this.y = newHead.y;
     }
-    die() {
-        this.dead = true;
-        if (this.isPlayer) document.getElementById('lobby').style.display = 'flex';
-    }
-    draw() {
-        if (this.dead) return;
+    draw(isMe = false) {
         ctx.save();
         if (this.invincible > 0) ctx.globalAlpha = 0.5;
-        ctx.strokeStyle = this.color;
+        ctx.strokeStyle = isMe ? this.color : "#silver";
         ctx.lineWidth = this.radius * 2;
         ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.moveTo(this.segments[0].x - camera.x, this.segments[0].y - camera.y);
-        this.segments.forEach(seg => ctx.lineTo(seg.x - camera.x, seg.y - camera.y));
-        ctx.stroke();
+        if(this.segments.length > 0) {
+            ctx.moveTo(this.segments[0].x - camera.x, this.segments[0].y - camera.y);
+            this.segments.forEach(seg => ctx.lineTo(seg.x - camera.x, seg.y - camera.y));
+            ctx.stroke();
+        }
         ctx.fillStyle = "white";
         ctx.fillText(this.name, this.segments[0].x - camera.x, this.segments[0].y - camera.y - 20);
         ctx.restore();
@@ -138,62 +123,57 @@ function resize() {
     height = canvas.height = window.innerHeight;
 }
 
-document.getElementById('nickname').value = localStorage.getItem('slitherin-nick') || "";
 document.getElementById('start-btn').onclick = () => {
-    const nick = document.getElementById('nickname').value || "YOU";
+    const nick = document.getElementById('nickname').value || "Snake";
     localStorage.setItem('slitherin-nick', nick);
     document.getElementById('lobby').style.display = 'none';
-    player = new Snake(nick, "#00ffcc", true, socket.id);
+    player = new Snake(nick, "#00ffcc", true);
     socket.emit('join', { name: nick });
     loop();
 };
 
-socket.on('updatePlayers', data => {
-    otherPlayers = data;
-});
+socket.on('updatePlayers', data => { otherSnakes = data; });
 
 function loop() {
-    if (!player || player.dead) return;
+    if (player.dead) { document.getElementById('lobby').style.display = 'flex'; return; }
     ctx.fillStyle = "#0a0a0a";
     ctx.fillRect(0, 0, width, height);
 
     player.update();
-    camera.x = player.segments[0].x - width / 2;
-    camera.y = player.segments[0].y - height / 2;
+    camera.x = player.x - width / 2;
+    camera.y = player.y - height / 2;
 
-    // 背景グリッド
+    // グリッド
     ctx.strokeStyle = "#1a1a1a";
     for (let x = -camera.x % 100; x < width; x += 100) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,height); ctx.stroke(); }
     for (let y = -camera.y % 100; y < height; y += 100) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(width,y); ctx.stroke(); }
 
-    // 自分を描画
-    player.draw();
-
-    // 他プレイヤー描画
-    for (let id in otherPlayers) {
+    // 他のプレイヤー描画
+    for (let id in otherSnakes) {
         if (id === socket.id) continue;
-        const p = otherPlayers[id];
+        const p = otherSnakes[id];
         ctx.strokeStyle = "silver";
         ctx.lineWidth = 24;
         ctx.beginPath();
-        if(p.segments && p.segments.length > 0) {
+        if(p.segments?.length > 0) {
             ctx.moveTo(p.segments[0].x - camera.x, p.segments[0].y - camera.y);
             p.segments.forEach(s => ctx.lineTo(s.x - camera.x, s.y - camera.y));
             ctx.stroke();
         }
     }
 
-    // ランキング更新
-    const all = [player, ...Object.values(otherPlayers).filter(o => o.id !== socket.id)];
+    player.draw(true);
+
+    // ランキング表示（あなたの提示コード準拠）
+    const all = [{name: player.name, score: player.score, isMe: true}, ...Object.values(otherSnakes).filter(s => s.id !== socket.id)];
     const list = all.sort((a,b) => b.score - a.score).slice(0, 7);
     document.getElementById('rank-list').innerHTML = list.map((s, i) => `
-        <div class="rank-row" style="color: ${s.id === socket.id ? '#00ffcc' : 'white'}">
+        <div class="rank-row" style="color: ${s.isMe ? '#00ffcc' : 'white'}">
             <span>#${i + 1} ${s.name}</span><span>${s.score || 0}</span>
         </div>`).join('');
     
     document.getElementById('score-val').innerText = player.score;
-
-    socket.emit('move', { x: player.x, y: player.y, segments: player.segments, score: player.score });
+    socket.emit('move', { segments: player.segments, score: player.score });
     requestAnimationFrame(loop);
 }
 
