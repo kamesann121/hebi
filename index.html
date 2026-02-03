@@ -1,142 +1,197 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>新しいタブ</title>
+    <title>Slitherin Online - Ultimate</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Georgia', serif; }
+        body { margin: 0; overflow: hidden; background: #0a0a0a; font-family: 'Arial', sans-serif; }
         canvas { display: block; }
         #lobby {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0, 15, 10, 0.95); display: flex; justify-content: center; align-items: center; z-index: 100;
         }
-        .content { text-align: center; color: #00ff88; border: 2px solid #004d2c; padding: 40px; border-radius: 15px; }
-        input { padding: 12px; background: #111; border: 1px solid #004d2c; color: #fff; width: 200px; margin-bottom: 20px; text-align: center; }
-        button { padding: 12px 40px; background: #004d2c; color: #fff; border: none; cursor: pointer; font-weight: bold; }
-        #score-ui { position: fixed; top: 20px; left: 20px; color: #00ff88; font-size: 24px; pointer-events: none; }
-        #rank-list { 
-            position: fixed; top: 20px; right: 20px; color: white; background: rgba(0,0,0,0.6); 
-            padding: 15px; border-radius: 10px; font-family: monospace; min-width: 150px;
+        .lobby-content { text-align: center; color: #00ffcc; border: 2px solid #004d2c; padding: 50px; border-radius: 20px; background: #000; }
+        input { padding: 12px; background: #111; border: 1px solid #00ffcc; color: #fff; width: 250px; text-align: center; font-size: 1.2rem; margin-bottom: 20px; }
+        button { padding: 15px 40px; background: #00ffcc; color: #000; border: none; cursor: pointer; font-weight: bold; font-size: 1.2rem; border-radius: 50px; }
+        #ui { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; color: white; }
+        #score-container { position: absolute; top: 20px; left: 20px; }
+        #score-val { font-size: 36px; font-weight: bold; color: #00ffcc; }
+        #leaderboard {
+            position: absolute; top: 20px; right: 20px;
+            background: rgba(0, 0, 0, 0.7); padding: 15px; border-radius: 10px;
+            border: 1px solid #444; min-width: 180px;
         }
-        .rank-row { display: flex; justify-content: space-between; margin-bottom: 5px; gap: 20px; }
+        .rank-row { display: flex; justify-content: space-between; font-size: 14px; margin: 4px 0; }
     </style>
 </head>
 <body>
 
 <div id="lobby">
-    <div class="content">
+    <div class="lobby-content">
         <h1>SLITHERIN</h1>
-        <input type="text" id="nickname" placeholder="名前を入力..." maxlength="10">
+        <input type="text" id="nickname" placeholder="Enter Name..." maxlength="10">
         <br>
-        <button id="start-btn">入寮する</button>
+        <button id="start-btn">JOIN GAME</button>
     </div>
 </div>
 
-<div id="score-ui">Score: <span id="score-val">0</span></div>
-<div id="rank-list"></div>
-<canvas id="game"></canvas>
+<div id="ui">
+    <div id="score-container">
+        <div id="score-val">0</div>
+        <div style="opacity: 0.6;">Space to BOOST</div>
+    </div>
+    <div id="leaderboard">
+        <div style="color: #ffcc00; font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid #555;">Leaderboard</div>
+        <div id="rank-list"></div>
+    </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const canvas = document.getElementById('game');
+const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const socket = io();
 
-let width, height;
-let player = { id: null, name: "", x: 2500, y: 2500, segments: [], radius: 15, length: 25, score: 0, dead: false, isPlayer: true };
-let snakes = []; // 自分、他プレイヤー、ボットすべて含める
+const WORLD_SIZE = 4000;
+const BOT_COUNT = 10;
+const NAMES = ["Zilla", "Rex", "Shadow", "Venom", "Alpha", "Ghost", "Bolt", "Neon", "Ryu", "Buster"];
+
+let width, height, player;
+let snakes = [];
 let foods = [];
-let particles = [];
+let otherPlayers = {};
 let camera = { x: 0, y: 0 };
 let mouse = { x: 0, y: 0, pressed: false };
-const FOOD_COUNT = 100;
+
+class Snake {
+    constructor(name, color, isPlayer = false, id = null) {
+        this.name = name;
+        this.color = color;
+        this.isPlayer = isPlayer;
+        this.id = id;
+        this.init();
+    }
+    init() {
+        this.x = 500 + Math.random() * (WORLD_SIZE - 1000);
+        this.y = 500 + Math.random() * (WORLD_SIZE - 1000);
+        this.segments = [];
+        this.length = 25;
+        this.radius = 12;
+        this.angle = Math.random() * Math.PI * 2;
+        this.speed = 3.5;
+        this.dead = false;
+        this.score = 0;
+        this.invincible = 120;
+        for (let i = 0; i < this.length; i++) this.segments.push({ x: this.x, y: this.y });
+    }
+    update() {
+        if (this.dead) return;
+        if (this.invincible > 0) this.invincible--;
+        const boostActive = this.isPlayer ? (mouse.pressed) : (Math.random() < 0.01);
+        const canBoost = boostActive && this.length > 15;
+        this.speed = canBoost ? 7 : 3.5;
+        if (canBoost) this.length -= 0.1;
+
+        if (this.isPlayer) {
+            this.angle = Math.atan2(mouse.y - height / 2, mouse.x - width / 2);
+        } else {
+            if (Math.random() < 0.02) this.angle += (Math.random() - 0.5) * 2;
+        }
+
+        const newHead = {
+            x: this.segments[0].x + Math.cos(this.angle) * this.speed,
+            y: this.segments[0].y + Math.sin(this.angle) * this.speed
+        };
+
+        if (newHead.x < 0 || newHead.x > WORLD_SIZE || newHead.y < 0 || newHead.y > WORLD_SIZE) { this.die(); return; }
+
+        this.segments.unshift(newHead);
+        if (this.segments.length > this.length) this.segments.pop();
+        this.score = Math.floor(this.length * 10);
+        this.x = newHead.x; this.y = newHead.y;
+    }
+    die() {
+        this.dead = true;
+        if (this.isPlayer) document.getElementById('lobby').style.display = 'flex';
+    }
+    draw() {
+        if (this.dead) return;
+        ctx.save();
+        if (this.invincible > 0) ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = this.radius * 2;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(this.segments[0].x - camera.x, this.segments[0].y - camera.y);
+        this.segments.forEach(seg => ctx.lineTo(seg.x - camera.x, seg.y - camera.y));
+        ctx.stroke();
+        ctx.fillStyle = "white";
+        ctx.fillText(this.name, this.segments[0].x - camera.x, this.segments[0].y - camera.y - 20);
+        ctx.restore();
+    }
+}
 
 function resize() {
     width = canvas.width = window.innerWidth;
     height = canvas.height = window.innerHeight;
 }
 
-window.onload = () => {
-    resize();
-    document.getElementById('nickname').value = localStorage.getItem('slitherin-nick') || "";
-};
-
+document.getElementById('nickname').value = localStorage.getItem('slitherin-nick') || "";
 document.getElementById('start-btn').onclick = () => {
-    player.name = document.getElementById('nickname').value || "Snake";
-    localStorage.setItem('slitherin-nick', player.name);
+    const nick = document.getElementById('nickname').value || "YOU";
+    localStorage.setItem('slitherin-nick', nick);
     document.getElementById('lobby').style.display = 'none';
-    socket.emit('join', { name: player.name });
-    snakes = [player]; // 自分の蛇をセット
+    player = new Snake(nick, "#00ffcc", true, socket.id);
+    socket.emit('join', { name: nick });
     loop();
 };
 
-// サーバー通信
-socket.on('updatePlayers', (data) => {
-    // 既存のsnakesから他プレイヤーを更新、または追加
-    const otherIds = Object.keys(data).filter(id => id !== socket.id);
-    // 簡易的にsnakesを再構成
-    snakes = [player, ...otherIds.map(id => ({
-        ...data[id],
-        isPlayer: false // 自分以外
-    }))];
+socket.on('updatePlayers', data => {
+    otherPlayers = data;
 });
 
 function loop() {
-    if (player.dead) return;
-    ctx.clearRect(0, 0, width, height);
+    if (!player || player.dead) return;
+    ctx.fillStyle = "#0a0a0a";
+    ctx.fillRect(0, 0, width, height);
 
-    // カメラ
-    camera.x = player.x - width / 2;
-    camera.y = player.y - height / 2;
+    player.update();
+    camera.x = player.segments[0].x - width / 2;
+    camera.y = player.segments[0].y - height / 2;
 
-    // グリッド描画
-    ctx.strokeStyle = "rgba(0, 128, 80, 0.15)";
-    for (let x = -camera.x % 100; x < width; x += 100) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke(); }
-    for (let y = -camera.y % 100; y < height; y += 100) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke(); }
+    // 背景グリッド
+    ctx.strokeStyle = "#1a1a1a";
+    for (let x = -camera.x % 100; x < width; x += 100) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,height); ctx.stroke(); }
+    for (let y = -camera.y % 100; y < height; y += 100) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(width,y); ctx.stroke(); }
 
-    // 自機の移動
-    const dx = mouse.x - width / 2;
-    const dy = mouse.y - height / 2;
-    const angle = Math.atan2(dy, dx);
-    const speed = mouse.pressed ? 7 : 4;
-    
-    player.x += Math.cos(angle) * speed;
-    player.y += Math.sin(angle) * speed;
-    player.segments.unshift({x: player.x, y: player.y});
-    if (player.segments.length > player.length) player.segments.pop();
+    // 自分を描画
+    player.draw();
 
-    // 自分の死を回避（自滅防止）
-    // 衝突判定はSnakeクラスまたはこのループで行う
-
-    // エフェクト更新と描画
-    if (mouse.pressed) {
-        particles.push({x: player.x, y: player.y, l: 1.0, c: "#00ff88"});
-        player.score = Math.floor(player.length * 10);
-        document.getElementById('score-val').innerText = player.score;
+    // 他プレイヤー描画
+    for (let id in otherPlayers) {
+        if (id === socket.id) continue;
+        const p = otherPlayers[id];
+        ctx.strokeStyle = "silver";
+        ctx.lineWidth = 24;
+        ctx.beginPath();
+        if(p.segments && p.segments.length > 0) {
+            ctx.moveTo(p.segments[0].x - camera.x, p.segments[0].y - camera.y);
+            p.segments.forEach(s => ctx.lineTo(s.x - camera.x, s.y - camera.y));
+            ctx.stroke();
+        }
     }
-    particles.forEach((p, i) => {
-        p.l -= 0.02;
-        ctx.globalAlpha = p.l;
-        ctx.fillStyle = p.c;
-        ctx.beginPath(); ctx.arc(p.x - camera.x, p.y - camera.y, 3, 0, Math.PI*2); ctx.fill();
-        if (p.l <= 0) particles.splice(i, 1);
-    });
-    ctx.globalAlpha = 1;
 
-    // 描画と判定
-    snakes.forEach(s => {
-        ctx.fillStyle = s.isPlayer ? "#00ff88" : "#silver";
-        s.segments?.forEach(seg => {
-            ctx.beginPath(); ctx.arc(seg.x - camera.x, seg.y - camera.y, 15, 0, Math.PI*2); ctx.fill();
-        });
-    });
-
-    // ランキング（あなたの提示コードを反映）
-    const list = [...snakes].filter(s => !s.dead).sort((a, b) => b.score - a.score).slice(0, 7);
+    // ランキング更新
+    const all = [player, ...Object.values(otherPlayers).filter(o => o.id !== socket.id)];
+    const list = all.sort((a,b) => b.score - a.score).slice(0, 7);
     document.getElementById('rank-list').innerHTML = list.map((s, i) => `
-        <div class="rank-row" style="color: ${s.isPlayer ? '#00ffcc' : 'white'}">
-            <span>#${i + 1} ${s.name}</span><span>${s.score}</span>
+        <div class="rank-row" style="color: ${s.id === socket.id ? '#00ffcc' : 'white'}">
+            <span>#${i + 1} ${s.name}</span><span>${s.score || 0}</span>
         </div>`).join('');
+    
+    document.getElementById('score-val').innerText = player.score;
 
     socket.emit('move', { x: player.x, y: player.y, segments: player.segments, score: player.score });
     requestAnimationFrame(loop);
@@ -147,7 +202,8 @@ window.addEventListener('mousedown', () => mouse.pressed = true);
 window.addEventListener('mouseup', () => mouse.pressed = false);
 window.addEventListener('keydown', e => { if (e.code === "Space") mouse.pressed = true; });
 window.addEventListener('keyup', e => { if (e.code === "Space") mouse.pressed = false; });
-window.addEventListener('resize', resize);
+window.onresize = resize;
+resize();
 </script>
 </body>
 </html>
