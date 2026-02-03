@@ -4,7 +4,7 @@ const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server);
 
 app.use(express.static(__dirname));
 
@@ -18,7 +18,7 @@ io.on('connection', (socket) => {
         if (players[socket.id]) {
             players[socket.id].segments = data.segments;
             players[socket.id].score = data.score;
-            socket.broadcast.emit('updatePlayers', players);
+            io.emit('updatePlayers', players); // 全員に同期
         }
     });
     socket.on('disconnect', () => {
@@ -27,5 +27,4 @@ io.on('connection', (socket) => {
     });
 });
 
-const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => console.log(`Active on ${PORT}`));
+server.listen(10000, () => console.log("Server running on 10000"));
