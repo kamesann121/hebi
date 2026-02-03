@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Slitherin Online</title>
+    <meta charset="UTF-8">
+    <title>新しいタブ</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: 'serif'; }
         canvas { display: block; }
@@ -9,30 +10,33 @@
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0, 20, 10, 0.9); display: flex; justify-content: center; align-items: center; z-index: 100;
         }
-        .content { text-align: center; color: #00ff88; border: 2px solid #004d2c; padding: 50px; border-radius: 20px; }
-        input { padding: 10px; background: #111; border: 1px solid #004d2c; color: #fff; width: 200px; margin-bottom: 20px; }
-        button { padding: 10px 30px; background: #004d2c; color: #fff; border: none; cursor: pointer; font-weight: bold; }
-        #ui { position: fixed; top: 20px; left: 20px; color: #00ff88; font-size: 24px; pointer-events: none; }
+        .content { text-align: center; color: #00ff88; border: 2px solid #004d2c; padding: 50px; border-radius: 20px; box-shadow: 0 0 20px #004d2c; }
+        h1 { font-size: 3rem; letter-spacing: 5px; margin-bottom: 20px; }
+        input { padding: 12px; background: #111; border: 1px solid #004d2c; color: #fff; width: 220px; margin-bottom: 20px; font-size: 1rem; text-align: center; }
+        button { padding: 12px 40px; background: #004d2c; color: #fff; border: none; cursor: pointer; font-weight: bold; font-size: 1.2rem; transition: 0.3s; }
+        button:hover { background: #008855; box-shadow: 0 0 15px #00ff88; }
+        #ui { position: fixed; top: 20px; left: 20px; color: #00ff88; font-size: 24px; pointer-events: none; text-shadow: 1px 1px 2px #000; }
     </style>
 </head>
 <body>
 <div id="lobby">
     <div class="content">
         <h1>SLITHERIN</h1>
-        <input type="text" id="nickname" placeholder="Name..." maxlength="12">
-        <button id="start-btn">START</button>
+        <input type="text" id="nickname" placeholder="名を入力せよ..." maxlength="12">
+        <br>
+        <button id="start-btn">入寮する</button>
     </div>
 </div>
 <div id="ui">Score: <span id="score-val">0</span></div>
 <canvas id="game"></canvas>
 
-<script src="https://cdn.socket.io"></script>
+<script src="/socket.io/socket.io.js"></script>
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const socket = io(); // Render上では空でOK
+const socket = io(); 
 
-let player = { id: null, name: "", x: 2500, y: 2500, segments: [], radius: 15, length: 25, score: 0, dead: false };
+let player = { id: null, name: "", x: 2500, y: 2500, segments: [], radius: 15, length: 25, score: 0, dead: false, active: false };
 let others = {};
 let particles = [];
 let camera = { x: 0, y: 0 };
@@ -49,31 +53,50 @@ document.getElementById('start-btn').onclick = () => {
     player.name = document.getElementById('nickname').value || "Snake";
     localStorage.setItem('slitherin-nick', player.name);
     document.getElementById('lobby').style.display = 'none';
+    
+    player.dead = false;
+    player.active = true;
+    
     socket.emit('join', { name: player.name });
-    loop();
+    requestAnimationFrame(loop); // スタート時にループ開始
 };
 
-socket.on('playerMoved', data => { others[data.id] = data; });
+socket.on('updatePlayers', data => {
+    // 自分以外のプレイヤーを登録
+    for(let id in data) {
+        if(id !== socket.id) others[id] = data[id];
+    }
+});
+
+socket.on('playerMoved', data => { if(data.id !== socket.id) others[data.id] = data; });
 socket.on('playerDisconnected', id => { delete others[id]; });
 
 function loop() {
+    if (!player.active) return;
+    
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     camera.x = player.x - canvas.width / 2;
     camera.y = player.y - canvas.height / 2;
 
+    // グリッド描画
+    ctx.strokeStyle = "rgba(0, 128, 80, 0.1)";
+    ctx.lineWidth = 1;
+    for (let x = -camera.x % 100; x < canvas.width; x += 100) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
+    for (let y = -camera.y % 100; y < canvas.height; y += 100) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+
     // 移動計算
-    const angle = Math.atan2(mouse.y - canvas.height/2, mouse.x - canvas.width/2);
+    const dx = mouse.x - canvas.width / 2;
+    const dy = mouse.y - canvas.height / 2;
+    const angle = Math.atan2(dy, dx);
     const speed = mouse.pressed ? 7 : 4;
+    
     player.x += Math.cos(angle) * speed;
     player.y += Math.sin(angle) * speed;
 
     player.segments.unshift({x: player.x, y: player.y});
     if (player.segments.length > player.length) player.segments.pop();
-
-    // 自滅判定の修正 (頭と15節以降のみ判定 = 自分にはぶつからない)
-    // 完全に自分をすり抜けたい場合はこのループを消す
 
     // ブーストエフェクト
     if (mouse.pressed) {
@@ -84,7 +107,7 @@ function loop() {
 
     // 描画：他プレイヤー
     for (let id in others) {
-        ctx.fillStyle = "#c0c0c0";
+        ctx.fillStyle = "#333"; // 他の人は暗めの色
         others[id].segments.forEach(s => {
             ctx.beginPath(); ctx.arc(s.x - camera.x, s.y - camera.y, 15, 0, Math.PI*2); ctx.fill();
         });
@@ -96,7 +119,7 @@ function loop() {
         ctx.beginPath(); ctx.arc(s.x - camera.x, s.y - camera.y, player.radius, 0, Math.PI*2); ctx.fill();
     });
 
-    // パーティクル
+    // エフェクト描画
     particles.forEach((p, i) => {
         p.l -= 0.02;
         ctx.globalAlpha = p.l;
